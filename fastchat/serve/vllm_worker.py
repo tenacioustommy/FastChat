@@ -3,12 +3,14 @@ A model worker that executes the model based on vLLM.
 
 See documentations at docs/vllm_integration.md
 """
-
+import re
 import argparse
 import asyncio
 import json
 from typing import List
-
+import base64
+from io import BytesIO
+from PIL import Image
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
@@ -68,6 +70,18 @@ class VLLMWorker(BaseModelWorker):
         self.call_ct += 1
 
         context = params.pop("prompt")
+        images = params.pop("images", None)
+        if images:
+            def base64_to_pil(base64_url):
+                pattern = r'data:image/[^;]+;base64,([A-Za-z0-9+/=]+)'
+                match = re.search(pattern, base64_url)
+                image_bytes = BytesIO(base64.b64decode(match.group(1)))
+                pil_image = Image.open(image_bytes).convert("RGB")
+                return pil_image
+            context= {
+                "prompt": context,
+                "multi_modal_data": {"image": base64_to_pil(images[0])},
+            }
         request_id = params.pop("request_id")
         temperature = float(params.get("temperature", 1.0))
         top_p = float(params.get("top_p", 1.0))
@@ -107,7 +121,6 @@ class VLLMWorker(BaseModelWorker):
             n=1,
             temperature=temperature,
             top_p=top_p,
-            use_beam_search=use_beam_search,
             stop=list(stop),
             stop_token_ids=stop_token_ids,
             max_tokens=max_new_tokens,

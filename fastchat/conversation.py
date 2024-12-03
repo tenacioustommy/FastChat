@@ -31,6 +31,7 @@ class SeparatorStyle(IntEnum):
     RWKV = auto()
     PHOENIX = auto()
     ROBIN = auto()
+    QWEN = auto()
     FALCON_CHAT = auto()
     CHATGLM3 = auto()
     DEEPSEEK_CHAT = auto()
@@ -42,7 +43,7 @@ class SeparatorStyle(IntEnum):
 
 
 IMAGE_PLACEHOLDER_STR = "$$<image>$$"
-
+QWEN_IMAGE_PLACEHOLDER_STR = "<|vision_start|><|image_pad|><|vision_end|>"
 
 @dataclasses.dataclass
 class Conversation:
@@ -203,6 +204,17 @@ class Conversation:
                 else:
                     ret += role + "\n"
             return ret
+        elif self.sep_style == SeparatorStyle.QWEN:
+            ret = "" if system_prompt == "" else system_prompt + self.sep + "\n"
+            for role, message in self.messages:
+                if message:
+                    if type(message) is tuple:
+                        message, images = message
+                        message = QWEN_IMAGE_PLACEHOLDER_STR * len(images) + message
+                    ret += role + "\n" + message + self.sep + "\n"
+                else:
+                    ret += role + "\n"
+            return ret
         elif self.sep_style == SeparatorStyle.CHATGLM3:
             ret = ""
             if self.system_message:
@@ -333,7 +345,7 @@ class Conversation:
             if i % 2 == 0:
                 if type(msg) is tuple:
                     for image in msg[1]:
-                        images.append(image.base64_str)
+                        images.append(image)
 
         return images
 
@@ -1875,14 +1887,14 @@ register_conv_template(
         system_template="<|im_start|>system\n{system_message}",
         system_message="You are a helpful assistant.",
         roles=("<|im_start|>user", "<|im_start|>assistant"),
-        sep_style=SeparatorStyle.CHATML,
+        sep_style=SeparatorStyle.QWEN,
         sep="<|im_end|>",
         stop_token_ids=[
             151643,
             151644,
             151645,
         ],  # "<|endoftext|>", "<|im_start|>", "<|im_end|>"
-        stop_str="<|endoftext|>",
+        stop_str="<|im_end|>",
     )
 )
 
