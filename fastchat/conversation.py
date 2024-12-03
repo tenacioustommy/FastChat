@@ -194,7 +194,7 @@ class Conversation:
                     ret += f"{role}："
             return ret
         elif self.sep_style == SeparatorStyle.CHATML:
-            ret = "" if system_prompt == "" else system_prompt + self.sep + "\n"
+            ret = "" if self.system_message == "" else system_prompt + self.sep + "\n"
             for role, message in self.messages:
                 if message:
                     if type(message) is tuple:
@@ -227,13 +227,12 @@ class Conversation:
             return ret
         elif self.sep_style == SeparatorStyle.CHATINTERN:
             # source: https://huggingface.co/internlm/internlm-chat-7b-8k/blob/bd546fa984b4b0b86958f56bf37f94aa75ab8831/modeling_internlm.py#L771
-            seps = [self.sep, self.sep2]
-            ret = system_prompt
+            ret = "" if self.system_message == "" else system_prompt
             for i, (role, message) in enumerate(self.messages):
                 if i % 2 == 0:
                     ret += "<s>"
                 if message:
-                    ret += role + ":" + message + seps[i % 2] + "\n"
+                    ret += role + ":" + message + self.sep + "\n"
                 else:
                     ret += role + ":"
             return ret
@@ -1679,13 +1678,14 @@ register_conv_template(
 register_conv_template(
     Conversation(
         name="internlm-chat",
-        system_message="A chat between a curious <|User|> and an <|Bot|>. The <|Bot|> gives helpful, detailed, and polite answers to the <|User|>'s questions.\n\n",
-        roles=("<|User|>", "<|Bot|>"),
+        system_template="<|im_start|>system\n{system_message}",
+        system_message="",
+        roles=("<|im_start|>user", "<|im_start|>assistant"),
         sep_style=SeparatorStyle.CHATINTERN,
-        sep="<eoh>",
-        sep2="<eoa>",
-        stop_token_ids=[1, 103028],
-        stop_str="<|User|>",
+        sep="<|im_end|>",
+        stop_token_ids=[
+            1, 92542
+        ],  # "<|endoftext|>", "<|im_start|>", "<|im_end|>"
     )
 )
 
