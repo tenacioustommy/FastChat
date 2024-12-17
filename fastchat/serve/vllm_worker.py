@@ -173,6 +173,10 @@ class VLLMWorker(BaseModelWorker):
                 if len(request_output.outputs) == 1
                 else [output.finish_reason for output in request_output.outputs],
             }
+            # if prompt_tokens + completion_tokens>30000:
+            #     with open(f"/cpfs01/user/huangzihan/workspace/logs/{request_id}.log", "w", encoding="utf-8") as f:
+            #         f.write(text_outputs)
+
             # Emit twice here to ensure a 'finish_reason' with empty content in the OpenAI API response.
             # This aligns with the behavior of model_worker.
             if request_output.finished:

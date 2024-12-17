@@ -52,8 +52,8 @@ def main():
         stream=True,
     )
 
-    print(f"{conv.roles[0]}: {args.message}")
-    print(f"{conv.roles[1]}: ", end="")
+    print(prompt)
+    # print(f"{conv.roles[1]}: ", end="")
     prev = 0
     for chunk in response.iter_lines(decode_unicode=False, delimiter=b"\0"):
         if chunk:

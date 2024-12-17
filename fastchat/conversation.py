@@ -205,7 +205,7 @@ class Conversation:
                     ret += role + "\n"
             return ret
         elif self.sep_style == SeparatorStyle.QWEN:
-            ret = "" if system_prompt == "" else system_prompt + self.sep + "\n"
+            ret = "" if self.system_message == "" else system_prompt + self.sep + "\n"
             for role, message in self.messages:
                 if message:
                     if type(message) is tuple:
@@ -229,8 +229,8 @@ class Conversation:
             # source: https://huggingface.co/internlm/internlm-chat-7b-8k/blob/bd546fa984b4b0b86958f56bf37f94aa75ab8831/modeling_internlm.py#L771
             ret = "" if self.system_message == "" else system_prompt
             for i, (role, message) in enumerate(self.messages):
-                if i % 2 == 0:
-                    ret += "<s>"
+                # if i % 2 == 0:
+                #     ret += "<s>"
                 if message:
                     ret += role + ":" + message + self.sep + "\n"
                 else:
@@ -1885,7 +1885,7 @@ register_conv_template(
     Conversation(
         name="qwen-7b-chat",
         system_template="<|im_start|>system\n{system_message}",
-        system_message="You are a helpful assistant.",
+        system_message="",
         roles=("<|im_start|>user", "<|im_start|>assistant"),
         sep_style=SeparatorStyle.QWEN,
         sep="<|im_end|>",
@@ -1894,7 +1894,7 @@ register_conv_template(
             151644,
             151645,
         ],  # "<|endoftext|>", "<|im_start|>", "<|im_end|>"
-        stop_str="<|im_end|>",
+        stop_str="<|endoftext|>",
     )
 )
 

@@ -429,7 +429,8 @@ async def create_chat_completion(request: ChatCompletionRequest):
         top_k=request.top_k,
         presence_penalty=request.presence_penalty,
         frequency_penalty=request.frequency_penalty,
-        max_tokens=request.max_tokens,
+        # max_tokens=request.max_tokens,
+        max_tokens=1024,
         echo=False,
         stop=request.stop,
     )
