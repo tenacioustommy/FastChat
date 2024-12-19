@@ -13,14 +13,30 @@ import sys
 import time
 from typing import AsyncGenerator, Generator
 import warnings
-
+import pickle
 import requests
-
+from fastapi.responses import Response
 from fastchat.constants import LOGDIR
 
 
 handler = None
 visited_loggers = set()
+
+class PickleResponse(Response):
+    """支持完整序列化的自定义响应类"""
+    media_type = "application/python-pickle"
+
+    def __init__(self, content: any, *args, **kwargs):
+        pickled_content = pickle.dumps(content)
+        super().__init__(content=pickled_content, *args, **kwargs)
+
+def serialize_obj(obj):
+    """将对象序列化为base64字符串"""
+    return base64.b64encode(pickle.dumps(obj)).decode('utf-8')
+
+def deserialize_obj(serialized_str):
+    """从base64字符串反序列化为对象"""
+    return pickle.loads(base64.b64decode(serialized_str.encode('utf-8')))
 
 
 def build_logger(logger_name, logger_filename):

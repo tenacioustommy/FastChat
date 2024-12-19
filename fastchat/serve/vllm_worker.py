@@ -18,13 +18,12 @@ from vllm import AsyncLLMEngine
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.sampling_params import SamplingParams
 from vllm.utils import random_uuid
-
 from fastchat.serve.base_model_worker import BaseModelWorker
 from fastchat.serve.model_worker import (
     logger,
     worker_id,
 )
-from fastchat.utils import get_context_length, is_partial_stop
+from fastchat.utils import get_context_length, is_partial_stop,deserialize_obj,PickleResponse
 
 
 app = FastAPI()
@@ -69,19 +68,16 @@ class VLLMWorker(BaseModelWorker):
     async def generate_stream(self, params):
         self.call_ct += 1
 
-        context = params.pop("prompt")
-        images = params.pop("images", None)
-        if images:
-            def base64_to_pil(base64_url):
-                pattern = r'data:image/[^;]+;base64,([A-Za-z0-9+/=]+)'
-                match = re.search(pattern, base64_url)
-                image_bytes = BytesIO(base64.b64decode(match.group(1)))
-                pil_image = Image.open(image_bytes).convert("RGB")
-                return pil_image
-            context= {
-                "prompt": context,
-                "multi_modal_data": {"image": base64_to_pil(images[0])},
-            }
+        prompt = params.pop("prompt")
+        multi_modal_data = params.pop("multi_modal_data", None)
+        if multi_modal_data:
+            multi_modal_data = deserialize_obj(multi_modal_data)
+            if "image" in multi_modal_data:
+                # vllm目前只支持image
+                prompt = {
+                    "prompt": prompt,
+                    "multi_modal_data": {"image": multi_modal_data["image"]},
+                }
         request_id = params.pop("request_id")
         temperature = float(params.get("temperature", 1.0))
         top_p = float(params.get("top_p", 1))
@@ -129,7 +125,7 @@ class VLLMWorker(BaseModelWorker):
             frequency_penalty=frequency_penalty,
             best_of=best_of,
         )
-        results_generator = engine.generate(context, sampling_params, request_id)
+        results_generator = engine.generate(prompt, sampling_params, request_id)
 
         async for request_output in results_generator:
             prompt = request_output.prompt
@@ -250,7 +246,7 @@ async def api_count_token(request: Request):
 
 @app.post("/worker_get_conv_template")
 async def api_get_conv(request: Request):
-    return worker.get_conv_template()
+    return PickleResponse(worker.get_conv_template())
 
 
 @app.post("/model_details")

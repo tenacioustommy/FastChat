@@ -21,6 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security.http import HTTPAuthorizationCredentials, HTTPBearer
 import httpx
+import pickle
+from fastchat.model.model_adapter import get_model_adapter
 
 from pydantic_settings import BaseSettings
 import shortuuid
@@ -32,7 +34,7 @@ from fastchat.constants import (
     WORKER_API_EMBEDDING_BATCH_SIZE,
     ErrorCode,
 )
-from fastchat.conversation import Conversation, SeparatorStyle
+from fastchat.conversation import Conversation
 from fastchat.protocol.openai_api_protocol import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -61,7 +63,7 @@ from fastchat.protocol.api_protocol import (
     APITokenCheckResponse,
     APITokenCheckResponseItem,
 )
-from fastchat.utils import build_logger
+from fastchat.utils import build_logger,serialize_obj
 
 logger = build_logger("openai_api_server", "openai_api_server.log")
 
@@ -81,17 +83,28 @@ async def fetch_remote(url, pload=None, name=None):
                 }
                 return json.dumps(ret)
 
+            # 检查响应的 content-type
+            content_type = response.headers.get('content-type', '')
+            
             async for chunk, _ in response.content.iter_chunks():
                 chunks.append(chunk)
-        output = b"".join(chunks)
+            output = b"".join(chunks)
+            
+            # 如果是 pickle 响应,直接用 pickle 反序列化
+            if 'application/python-pickle' in content_type:
+                res = pickle.loads(output)
+                if name != "":
+                    res = res[name]
+                return res
 
-    if name is not None:
-        res = json.loads(output)
-        if name != "":
-            res = res[name]
-        return res
+            # 其他情况按 JSON 处理
+            if name is not None:
+                res = json.loads(output)
+                if name != "":
+                    res = res[name]
+                return res
 
-    return output
+            return output
 
 
 class AppSettings(BaseSettings):
@@ -281,56 +294,17 @@ async def get_gen_params(
     use_beam_search: Optional[bool] = None,
 ) -> Dict[str, Any]:
     conv = await get_conv(model_name, worker_addr)
-    conv = Conversation(
-        name=conv["name"],
-        system_template=conv["system_template"],
-        system_message=conv["system_message"],
-        roles=conv["roles"],
-        messages=list(conv["messages"]),  # prevent in-place modification
-        offset=conv["offset"],
-        sep_style=SeparatorStyle(conv["sep_style"]),
-        sep=conv["sep"],
-        sep2=conv["sep2"],
-        stop_str=conv["stop_str"],
-        stop_token_ids=conv["stop_token_ids"],
-    )
-
     if isinstance(messages, str):
         prompt = messages
-        images = []
+        multi_modal_data = None
     else:
-        for message in messages:
-            msg_role = message["role"]
-            if msg_role == "system":
-                conv.set_system_message(message["content"])
-            elif msg_role == "user":
-                if type(message["content"]) == list:
-                    image_list = [
-                        item["image_url"]["url"]
-                        for item in message["content"]
-                        if item["type"] == "image_url"
-                    ]
-                    text_list = [
-                        item["text"]
-                        for item in message["content"]
-                        if item["type"] == "text"
-                    ]
-
-                    # TODO(chris): This only applies to LLaVA model. Implement an image_token string in the conv template.
-                    # text = "<image>\n" * len(image_list)
-                    text = "\n".join(text_list)
-                    conv.append_message(conv.roles[0], (text, image_list))
-                else:
-                    conv.append_message(conv.roles[0], message["content"])
-            elif msg_role == "assistant":
-                conv.append_message(conv.roles[1], message["content"])
-            else:
-                raise ValueError(f"Unknown role: {msg_role}")
-
-        # Add a blank message for the assistant.
-        conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
-        images = conv.get_images()
+        conv.messages = messages
+        adapter = get_model_adapter(conv.model_path)
+        prompt, multi_modal_data = adapter.process_input(messages)
+        if multi_modal_data and any(value is not None for value in multi_modal_data.values()):
+            multi_modal_data = serialize_obj(multi_modal_data)
+        else:
+            multi_modal_data = None
 
     gen_params = {
         "model": model_name,
@@ -343,22 +317,22 @@ async def get_gen_params(
         "frequency_penalty": frequency_penalty,
         "max_new_tokens": max_tokens,
         "echo": echo,
-        "stop_token_ids": conv.stop_token_ids,
+        "stop_token_ids": adapter.tokenizer.eos_token_id
     }
 
-    if len(images) > 0:
-        gen_params["images"] = images
+    if multi_modal_data:
+        gen_params["multi_modal_data"] = multi_modal_data
 
     if best_of is not None:
         gen_params.update({"best_of": best_of})
     if use_beam_search is not None:
         gen_params.update({"use_beam_search": use_beam_search})
 
-    new_stop = set()
-    _add_to_set(stop, new_stop)
-    _add_to_set(conv.stop_str, new_stop)
+    # new_stop = set()
+    # _add_to_set(stop, new_stop)
+    # _add_to_set(conv.stop_str, new_stop)
 
-    gen_params["stop"] = list(new_stop)
+    # gen_params["stop"] = list(new_stop)
 
     logger.debug(f"==== request ====\n{gen_params}")
     return gen_params
@@ -384,7 +358,7 @@ async def get_worker_address(model_name: str) -> str:
     return worker_addr
 
 
-async def get_conv(model_name: str, worker_addr: str):
+async def get_conv(model_name: str, worker_addr: str) -> Conversation:
     conv_template = conv_template_map.get((worker_addr, model_name))
     if conv_template is None:
         conv_template = await fetch_remote(
@@ -429,8 +403,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
         top_k=request.top_k,
         presence_penalty=request.presence_penalty,
         frequency_penalty=request.frequency_penalty,
-        # max_tokens=request.max_tokens,
-        max_tokens=1024,
+        max_tokens=request.max_tokens,
         echo=False,
         stop=request.stop,
     )

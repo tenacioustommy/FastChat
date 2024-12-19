@@ -20,9 +20,11 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
+    AutoProcessor,
     LlamaTokenizer,
     LlamaForCausalLM,
     T5Tokenizer,
+    Qwen2VLForConditionalGeneration
 )
 
 from fastchat.constants import CPU_ISA
@@ -36,7 +38,8 @@ from fastchat.model.model_yuan2 import generate_stream_yuan2
 from fastchat.model.model_exllama import generate_stream_exllama
 from fastchat.model.model_xfastertransformer import generate_stream_xft
 from fastchat.model.model_cllm import generate_stream_cllm
-
+from typing import List, Any, Dict
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from fastchat.model.monkey_patch_non_inplace import (
     replace_llama_attn_with_non_inplace_operations,
 )
@@ -96,9 +99,22 @@ OPENAI_MODEL_LIST = (
 
 class BaseModelAdapter:
     """The base and the default model adapter."""
-
+    model_path: str = None
+    processor: Any = None
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast = None
     use_fast_tokenizer = True
 
+    def init_adapter(self, model_path: str):
+        self.model_path = model_path
+        self.processor = AutoProcessor.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+    def process_input(self, messages: List[List[str]]) -> str:
+        return self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True),None
+    
+    def get_inputs(self,prompt,multi_modal_data=None):
+        return self.tokenizer([prompt],return_tensors="pt")
+    
     def match(self, model_path: str):
         return True
 
@@ -141,7 +157,8 @@ class BaseModelAdapter:
         )
 
     def get_default_conv_template(self, model_path: str) -> Conversation:
-        return get_conv_template("one_shot")
+        conv = get_conv_template(model_path)
+        return conv
 
 
 # A global registry for all model adapters
@@ -157,16 +174,11 @@ def register_model_adapter(cls):
 @cache
 def get_model_adapter(model_path: str) -> BaseModelAdapter:
     """Get a model adapter for a model_path."""
-    model_path_basename = os.path.basename(os.path.normpath(model_path))
+    config = AutoConfig.from_pretrained(model_path)
 
-    # Try the basename of model_path at first
     for adapter in model_adapters:
-        if adapter.match(model_path_basename) and type(adapter) != BaseModelAdapter:
-            return adapter
-
-    # Then try the full path
-    for adapter in model_adapters:
-        if adapter.match(model_path):
+        if adapter.match(config.model_type) and type(adapter) != BaseModelAdapter:
+            adapter.init_adapter(model_path)
             return adapter
 
     raise ValueError(f"No valid model adapter for {model_path}")
@@ -405,84 +417,7 @@ def get_generate_stream_function(model: torch.nn.Module, model_path: str):
     """Get the generate_stream function for inference."""
     from fastchat.serve.inference import generate_stream
 
-    model_type = str(type(model)).lower()
-    is_peft = "peft" in model_type
-    is_chatglm = "chatglm" in model_type
-    is_falcon = "rwforcausallm" in model_type
-    is_codet5p = "codet5p" in model_type
-    is_exllama = "exllama" in model_type
-    is_xft = "xft" in model_type
-    is_yuan = "yuan" in model_type
-    is_cllm = "consistency-llm" in model_path.lower()
-
-    if is_chatglm:
-        return generate_stream_chatglm
-    elif is_falcon:
-        return generate_stream_falcon
-    elif is_codet5p:
-        return generate_stream_codet5p
-    elif is_exllama:
-        return generate_stream_exllama
-    elif is_xft:
-        return generate_stream_xft
-    elif is_yuan:
-        return generate_stream_yuan2
-    elif is_cllm:
-        return generate_stream_cllm
-
-    elif peft_share_base_weights and is_peft:
-        # Return a curried stream function that loads the right adapter
-        # according to the model_name available in this context.  This ensures
-        # the right weights are available.
-        @torch.inference_mode()
-        def generate_stream_peft(
-            model,
-            tokenizer,
-            params: Dict,
-            device: str,
-            context_len: int,
-            stream_interval: int = 2,
-            judge_sent_end: bool = False,
-        ):
-            model.set_adapter(model_path)
-            base_model_type = str(type(model.base_model.model))
-            is_chatglm = "chatglm" in base_model_type
-            is_falcon = "rwforcausallm" in base_model_type
-            is_codet5p = "codet5p" in base_model_type
-            is_exllama = "exllama" in base_model_type
-            is_xft = "xft" in base_model_type
-            is_yuan = "yuan" in base_model_type
-            is_cllm = "consistency-llm" in model_path.lower()
-
-            generate_stream_function = generate_stream
-            if is_chatglm:
-                generate_stream_function = generate_stream_chatglm
-            elif is_falcon:
-                generate_stream_function = generate_stream_falcon
-            elif is_codet5p:
-                generate_stream_function = generate_stream_codet5p
-            elif is_exllama:
-                generate_stream_function = generate_stream_exllama
-            elif is_xft:
-                generate_stream_function = generate_stream_xft
-            elif is_yuan:
-                generate_stream_function = generate_stream_yuan2
-            elif is_cllm:
-                generate_stream_function = generate_stream_cllm
-            for x in generate_stream_function(
-                model,
-                tokenizer,
-                params,
-                device,
-                context_len,
-                stream_interval,
-                judge_sent_end,
-            ):
-                yield x
-
-        return generate_stream_peft
-    else:
-        return generate_stream
+    return generate_stream
 
 
 def add_model_args(parser):
@@ -1771,7 +1706,7 @@ class QwenChatAdapter(BaseModelAdapter):
     """
 
     def match(self, model_path: str):
-        return "qwen" in model_path.lower()
+        return "qwen2" == model_path.lower()
 
     def float_set(self, config, option):
         config.bf16 = False
@@ -1823,7 +1758,89 @@ class QwenChatAdapter(BaseModelAdapter):
         return model, tokenizer
 
     def get_default_conv_template(self, model_path: str) -> Conversation:
-        return get_conv_template("qwen-7b-chat")
+        conv_template = Conversation()
+        return conv_template
+    
+    def process_input(self, messages: List[List[str]]):
+        text= self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
+        return text
+    
+class Qwen2VLChatAdapter(BaseModelAdapter):
+    """The model adapter for Qwen2-vl
+    To run this model, you need to ensure additional flash attention installation:
+    ``` bash
+    git clone https://github.com/Dao-AILab/flash-attention
+    cd flash-attention && pip install .
+    pip install csrc/layer_norm
+    pip install csrc/rotary
+    ```
+
+    Since from 2.0, the following change happened
+    - `flash_attn_unpadded_func` -> `flash_attn_varlen_func`
+    - `flash_attn_unpadded_qkvpacked_func` -> `flash_attn_varlen_qkvpacked_func`
+    - `flash_attn_unpadded_kvpacked_func` -> `flash_attn_varlen_kvpacked_func`
+    You may need to revise the code in: https://huggingface.co/Qwen/Qwen-7B-Chat/blob/main/modeling_qwen.py#L69
+    to from flash_attn.flash_attn_interface import flash_attn_varlen_func as flash_attn_unpadded_func
+    """
+    def match(self, model_name: str):
+        return "qwen2_vl" in model_name.lower()
+
+    def float_set(self, config, option):
+        config.bf16 = False
+        config.fp16 = False
+        config.fp32 = False
+
+        if option == "bf16":
+            config.bf16 = True
+        elif option == "fp16":
+            config.fp16 = True
+        elif option == "fp32":
+            config.fp32 = True
+        else:
+            print("Invalid option. Please choose one from 'bf16', 'fp16' and 'fp32'.")
+
+    def load_model(self, model_path: str, from_pretrained_kwargs: dict):
+
+        revision = from_pretrained_kwargs.get("revision", "main")
+        config = AutoConfig.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+        )
+        # NOTE: if you use the old version of model file, please remove the comments below
+        # config.use_flash_attn = False
+        self.float_set(config, "fp16")
+        model = Qwen2VLForConditionalGeneration.from_pretrained(
+            model_path,
+            config=config,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+            **from_pretrained_kwargs,
+        ).eval()
+        # tokenizer = AutoTokenizer.from_pretrained(
+        #     model_path, trust_remote_code=True, revision=revision
+        # )
+
+        return model, self.tokenizer
+
+    def get_default_conv_template(self, model_path: str) -> Conversation:
+        conv_template = Conversation()
+        return conv_template
+    
+    def process_input(self, messages: List[List[str]]):
+        prompt = self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
+        from qwen_vl_utils import process_vision_info
+        image_inputs, video_inputs = process_vision_info(messages)
+        return prompt,{"image":image_inputs,"video":video_inputs}
+    
+    def get_inputs(self,prompt,multi_modal_data):
+        input_ids = self.processor(
+            text=[prompt],
+            images=multi_modal_data["image"],
+            videos=multi_modal_data["video"],
+            padding=True,
+            return_tensors="pt"
+        )
+        return input_ids
 
 
 class SmaugChatAdapter(BaseModelAdapter):
@@ -2602,6 +2619,6 @@ register_model_adapter(Llama3Adapter)
 register_model_adapter(Llama31Adapter)
 register_model_adapter(GrokAdapter)
 register_model_adapter(NoSystemAdapter)
-
+register_model_adapter(Qwen2VLChatAdapter)
 # After all adapters, try the default base adapter.
 register_model_adapter(BaseModelAdapter)

@@ -9,7 +9,7 @@ import requests
 
 from fastchat.constants import WORKER_HEART_BEAT_INTERVAL
 from fastchat.conversation import Conversation
-from fastchat.utils import pretty_print_semaphore, build_logger
+from fastchat.utils import pretty_print_semaphore, build_logger,PickleResponse
 
 
 worker = None
@@ -46,12 +46,13 @@ class BaseModelWorker:
         self.model_names = model_names or [model_path.split("/")[-1]]
         self.limit_worker_concurrency = limit_worker_concurrency
         self.conv = self.make_conv_template(conv_template, model_path)
-        self.conv.sep_style = int(self.conv.sep_style)
+        # self.conv.sep_style = int(self.conv.sep_style)
         self.multimodal = multimodal
         self.tokenizer = None
         self.context_len = None
         self.call_ct = 0
         self.semaphore = None
+        self.model_path = model_path
 
         self.heart_beat_thread = None
 
@@ -68,13 +69,10 @@ class BaseModelWorker:
         """
         can be overrided to costomize the conversation template for different model workers.
         """
-        from fastchat.conversation import get_conv_template
         from fastchat.model.model_adapter import get_conversation_template
 
-        if conv_template:
-            conv = get_conv_template(conv_template)
-        else:
-            conv = get_conversation_template(model_path)
+        # conv = get_conversation_template(model_path)
+        conv = Conversation(model_path=model_path)
         return conv
 
     def init_heart_beat(self):
@@ -233,7 +231,7 @@ async def api_count_token(request: Request):
 
 @app.post("/worker_get_conv_template")
 async def api_get_conv(request: Request):
-    return worker.get_conv_template()
+    return PickleResponse(worker.get_conv_template())
 
 
 @app.post("/model_details")

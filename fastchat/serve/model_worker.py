@@ -19,7 +19,9 @@ from fastchat.model.model_adapter import (
     load_model,
     add_model_args,
     get_generate_stream_function,
+    get_model_adapter,
 )
+
 from fastchat.modules.awq import AWQConfig
 from fastchat.modules.exllama import ExllamaConfig
 from fastchat.modules.xfastertransformer import XftConfig
@@ -111,9 +113,10 @@ class ModelWorker(BaseModelWorker):
         try:
             if self.seed is not None:
                 set_seed(self.seed)
+            adaptor=get_model_adapter(self.model_path)
             for output in self.generate_stream_func(
                 self.model,
-                self.tokenizer,
+                adaptor,
                 params,
                 self.device,
                 self.context_len,
