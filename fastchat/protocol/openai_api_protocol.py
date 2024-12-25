@@ -71,6 +71,7 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     presence_penalty: Optional[float] = 0.0
     frequency_penalty: Optional[float] = 0.0
+    repetition_penalty: Optional[float] = 1.0
     user: Optional[str] = None
 
 

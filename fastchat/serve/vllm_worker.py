@@ -8,9 +8,6 @@ import argparse
 import asyncio
 import json
 from typing import List
-import base64
-from io import BytesIO
-from PIL import Image
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
@@ -23,7 +20,7 @@ from fastchat.serve.model_worker import (
     logger,
     worker_id,
 )
-from fastchat.utils import get_context_length, is_partial_stop,deserialize_obj,PickleResponse
+from fastchat.utils import get_context_length, is_partial_stop,deserialize_obj, PickleResponse
 
 
 app = FastAPI()
@@ -67,7 +64,6 @@ class VLLMWorker(BaseModelWorker):
 
     async def generate_stream(self, params):
         self.call_ct += 1
-
         prompt = params.pop("prompt")
         multi_modal_data = params.pop("multi_modal_data", None)
         if multi_modal_data:
@@ -81,18 +77,13 @@ class VLLMWorker(BaseModelWorker):
         request_id = params.pop("request_id")
         temperature = float(params.get("temperature", 1.0))
         top_p = float(params.get("top_p", 1))
-        top_k = params.get("top_k", -1)
         presence_penalty = float(params.get("presence_penalty", 0.0))
         frequency_penalty = float(params.get("frequency_penalty", 0.0))
-        max_new_tokens = params.get("max_new_tokens", 256)
+        max_new_tokens = params.get("max_new_tokens", 1024)
         stop_str = params.get("stop", None)
-        stop_token_ids = params.get("stop_token_ids", None) or []
-        if self.tokenizer.eos_token_id is not None:
-            stop_token_ids.append(self.tokenizer.eos_token_id)
+        stop_token_ids = params.get("stop_token_ids", None)
         echo = params.get("echo", True)
-        use_beam_search = params.get("use_beam_search", False)
         best_of = params.get("best_of", None)
-
         request = params.get("request", None)
 
         # Handle stop_str
@@ -102,11 +93,12 @@ class VLLMWorker(BaseModelWorker):
         elif isinstance(stop_str, list) and stop_str != []:
             stop.update(stop_str)
 
-        for tid in stop_token_ids:
-            if tid is not None:
-                s = self.tokenizer.decode(tid)
-                if s != "":
-                    stop.add(s)
+        if stop_token_ids is not None:
+            for tid in stop_token_ids:
+                if tid is not None:
+                    s = self.tokenizer.decode(tid)
+                    if s != "":
+                        stop.add(s)
 
         # make sampling params in vllm
         top_p = max(top_p, 1e-5)
@@ -123,6 +115,7 @@ class VLLMWorker(BaseModelWorker):
             top_k=top_k,
             presence_penalty=presence_penalty,
             frequency_penalty=frequency_penalty,
+            repetition_penalty=1.1, 
             best_of=best_of,
         )
         results_generator = engine.generate(prompt, sampling_params, request_id)

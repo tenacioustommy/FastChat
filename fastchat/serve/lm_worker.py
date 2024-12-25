@@ -17,7 +17,7 @@ import uvicorn
 from lmdeploy import pipeline, GenerationConfig
 from lmdeploy.archs import autoget_backend
 import uuid
-
+from fastchat.utils import PickleResponse
 from fastchat.serve.base_model_worker import BaseModelWorker
 from fastchat.serve.model_worker import (
     logger,
@@ -87,17 +87,14 @@ class LMDeployWorker(BaseModelWorker):
         request_id = params.pop("request_id")
         temperature = float(params.get("temperature", 1.0))
         top_p = float(params.get("top_p", 1.0))
-        top_k = params.get("top_k", 1)
-        frequency_penalty = float(params.get("frequency_penalty", 0.0))
+        repetition_penalty = float(params.get("repetition_penalty", 1.0))
         max_new_tokens = params.get("max_new_tokens", 256)
         stop_str = params.get("stop", None)
-        stop_token_ids = params.get("stop_token_ids", None) or []
+        stop_token_ids = params.get("stop_token_ids", None)
 
-        if top_k == -1:
-            top_k = 1
 
-        if self.tokenizer.eos_token_id is not None:
-            stop_token_ids.append(self.tokenizer.eos_token_id)
+        # if self.tokenizer.eos_token_id is not None:
+        #     stop_token_ids.append(self.tokenizer.eos_token_id)
         echo = params.get("echo", True)
 
         lmdeploy_session_id = self.call_ct
@@ -110,19 +107,20 @@ class LMDeployWorker(BaseModelWorker):
         elif isinstance(stop_str, list) and stop_str != []:
             stop.update(stop_str)
 
-        for tid in stop_token_ids:
-            if tid is not None:
-                s = self.tokenizer.decode(tid)
-                if s != "":
-                    stop.add(s)
+        if stop_token_ids is not None:
+            for tid in stop_token_ids:
+                if tid is not None:
+                    s = self.tokenizer.decode(tid)
+                    if s != "":
+                        stop.add(s)
 
         gen_config = GenerationConfig(
             temperature=temperature,
             top_p=top_p,
-            top_k=top_k,
-            repetition_penalty=frequency_penalty,
+            repetition_penalty=repetition_penalty,
             max_new_tokens=max_new_tokens,
             stop_words=list(stop),
+            do_sample=True,
         )
 
         request = params.get("request", None)
@@ -225,7 +223,7 @@ async def api_count_token(request: Request):
 
 @app.post("/worker_get_conv_template")
 async def api_get_conv(request: Request):
-    return worker.get_conv_template()
+    return PickleResponse(worker.get_conv_template())
 
 
 @app.post("/model_details")

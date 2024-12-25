@@ -283,9 +283,9 @@ async def get_gen_params(
     *,
     temperature: float,
     top_p: float,
-    top_k: Optional[int],
     presence_penalty: Optional[float],
     frequency_penalty: Optional[float],
+    repetition_penalty: Optional[float],
     max_tokens: Optional[int],
     echo: Optional[bool],
     logprobs: Optional[int] = None,
@@ -312,12 +312,12 @@ async def get_gen_params(
         "temperature": temperature,
         "logprobs": logprobs,
         "top_p": top_p,
-        "top_k": top_k,
         "presence_penalty": presence_penalty,
         "frequency_penalty": frequency_penalty,
         "max_new_tokens": max_tokens,
         "echo": echo,
-        "stop_token_ids": adapter.tokenizer.eos_token_id
+        "repetition_penalty": repetition_penalty,
+        # "stop_token_ids": adapter.tokenizer.eos_token_id
     }
 
     if multi_modal_data:
@@ -400,9 +400,9 @@ async def create_chat_completion(request: ChatCompletionRequest):
         request.messages,
         temperature=request.temperature,
         top_p=request.top_p,
-        top_k=request.top_k,
         presence_penalty=request.presence_penalty,
         frequency_penalty=request.frequency_penalty,
+        repetition_penalty=request.repetition_penalty,
         max_tokens=request.max_tokens,
         echo=False,
         stop=request.stop,

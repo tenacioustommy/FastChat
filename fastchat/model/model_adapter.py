@@ -110,7 +110,7 @@ class BaseModelAdapter:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     def process_input(self, messages: List[List[str]]) -> str:
-        return self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True),None
+        return self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True), None
     
     def get_inputs(self,prompt,multi_modal_data=None):
         return self.tokenizer([prompt],return_tensors="pt")
@@ -1761,9 +1761,6 @@ class QwenChatAdapter(BaseModelAdapter):
         conv_template = Conversation()
         return conv_template
     
-    def process_input(self, messages: List[List[str]]):
-        text= self.tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
-        return text
     
 class Qwen2VLChatAdapter(BaseModelAdapter):
     """The model adapter for Qwen2-vl
